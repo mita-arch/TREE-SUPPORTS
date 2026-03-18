@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Tree Support Generator
 
 Generates lightweight tree-shaped 3D printing supports for overhanging regions of an STL model.
@@ -149,3 +150,6 @@ tree_support/
 **Very slow runtime**
 - Reduce `--n_particles` and `--n_iterations` for a quick preview.
 - Reduce `--n_topologies` to 1.
+=======
+# TREE-SUPPORTS
+>>>>>>> c5572b4e0c84414d3c1c54b52ec260485b1000d9
