@@ -31,7 +31,7 @@ DESCENT_DIAM_GROWTH   = 1.08
 # Outward lean per descent level, as a fraction of grid XY resolution.
 # 0.15 = move 15% of grid_resolution outward from model centre each level.
 LEAN_FRAC    = 0.18
-MIN_LEAN_MM  = 1.5   # minimum absolute lean per level (mm)
+MIN_LEAN_MM  = 1.2   # minimum absolute lean per level (mm)
 
 
 # ─── Data structures ──────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ def build_hierarchical_topology(support_points: np.ndarray,
                                  model_center_xy: np.ndarray = None,
                                  tip_diameter: float = 0.5,
                                  max_diameter: float = 3.0,
-                                 n_merge_passes: int = 8,
+                                 n_merge_passes: int = 4,
                                  seed: int = None) -> 'Tree':
     """
     Build a collision-aware hierarchical tree support.
