@@ -29,7 +29,7 @@ class Grid:
         Z height of each horizontal level.
     """
 
-    def __init__(self, bounds, xy_resolution=10.0, z_resolution=None):
+    def __init__(self, bounds, xy_resolution, z_resolution=None):
         """
         Parameters
         ----------

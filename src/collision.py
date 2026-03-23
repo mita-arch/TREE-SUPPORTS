@@ -1,119 +1,173 @@
 """
-Collision Utilities
--------------------
-Helpers for keeping tree branches outside the original model.
+Collision Utilities  (v4 — raycasting inside/outside + segment sampling)
+------------------------------------------------------------------------
 
-Two main jobs:
-  1. filter_columns_inside_mesh  — remove grid columns whose XY footprint
-     falls inside or too close to the model at overhang height.
-     This is what prevents supports from spawning inside the stem.
+Two distinct tests are needed:
 
-  2. segment_clears_mesh         — check that the straight line between
-     two 3D points does not pass through the model.
-     Used when choosing merge-node positions.
+  1. inside_mesh(pts, mesh)
+     Uses ray casting (trimesh.ray) to determine whether points are
+     geometrically INSIDE the solid model.  This is the correct test
+     for "is a node placed inside geometry" — proximity to surface is
+     NOT sufficient because a point can be far from any surface yet
+     still be inside a convex region.
+
+  2. segment_clears_mesh(a, b, mesh, clearance)
+     Samples N points along the line a→b and checks each one is:
+       (a) not inside the mesh, AND
+       (b) at least `clearance` mm from any surface.
+     Used for every branch before it is placed.
 """
 
 import numpy as np
 
-
-# How far (mm) a node must stay from the model surface.
-# Increase if branches still touch the model.
-CLEARANCE_MM = 2.5
+CLEARANCE_MM  = 2.0   # min distance from model surface
+N_SEG_SAMPLES = 10    # samples per branch segment for clearance check
 
 
-def _sample_column_positions(col_xy, z_values):
-    """Return a (K, 3) array of sample points along a column at given z heights."""
-    n = len(z_values)
-    pts = np.zeros((n, 3), dtype=float)
-    pts[:, 0] = col_xy[0]
-    pts[:, 1] = col_xy[1]
-    pts[:, 2] = z_values
-    return pts
+# ─── Inside/outside test ──────────────────────────────────────────────────────
 
-
-def build_proximity_filter(mesh, grid, clearance=CLEARANCE_MM):
+def points_inside_mesh(pts: np.ndarray, mesh) -> np.ndarray:
     """
-    Return a set of column indices that are SAFE to use (not inside or
-    too close to the mesh at any height the support might occupy).
+    Return a bool array: True where pts[i] is INSIDE the mesh volume.
 
-    Uses trimesh.proximity.closest_point for distance queries.
-    Falls back gracefully if trimesh is not fully available.
+    Uses winding-number / ray-intersection via trimesh.  Falls back to
+    all-False (assume outside) if trimesh ray is unavailable.
 
     Parameters
     ----------
-    mesh      : trimesh.Trimesh
-    grid      : Grid
-    clearance : float — minimum allowed distance from model surface (mm)
+    pts  : (N, 3) array of query points
+    mesh : trimesh.Trimesh
 
     Returns
     -------
-    safe_cols : set[int]
+    inside : (N,) bool array
     """
+    pts = np.atleast_2d(pts).astype(float)
     try:
-        from trimesh import proximity 
-    except ImportError:
-        print("  [collision] trimesh.proximity not available — skipping column filter")
-        return set(range(grid.n_cols))
-
-    safe_cols = set()
-    blocked   = 0
-
-    # Sample each column at several z heights to check clearance
-    sample_zs = grid.levels[::max(1, grid.n_levels // 6)]   # ~6 samples per column
-
-    print(f"  [collision] Checking {grid.n_cols} columns "
-          f"at {len(sample_zs)} heights (clearance={clearance} mm)...")
-
-    for col_idx in range(grid.n_cols):
-        xy   = grid.col_positions[col_idx]
-        pts  = _sample_column_positions(xy, sample_zs)
-
-        # closest_point returns (closest_pt, distance, triangle_id)
-        _, dists, _ = proximity.closest_point(mesh, pts)
-
-        min_dist = float(dists.min())
-
-        # A column is blocked if it is inside OR closer than clearance to surface
-        if min_dist < clearance:
-            blocked += 1
-        else:
-            safe_cols.add(col_idx)
-
-    print(f"  [collision] Safe columns: {len(safe_cols)} / {grid.n_cols} "
-          f"({blocked} blocked by model)")
-    return safe_cols
+        return mesh.contains(pts)
+    except Exception:
+        return np.zeros(len(pts), dtype=bool)
 
 
-def segment_clears_mesh(p_start, p_end, mesh, n_samples=8, clearance=CLEARANCE_MM):
+def point_is_inside(pt: np.ndarray, mesh) -> bool:
+    """Scalar version of points_inside_mesh."""
+    return bool(points_inside_mesh(pt.reshape(1, 3), mesh)[0])
+
+
+# ─── Surface proximity test ───────────────────────────────────────────────────
+
+def points_near_surface(pts: np.ndarray, mesh, clearance: float = CLEARANCE_MM
+                        ) -> np.ndarray:
     """
-    Return True if the straight line from p_start to p_end stays at least
-    `clearance` mm from the model surface at all sampled points.
+    Return bool array: True where pts[i] is closer than `clearance` to
+    any surface triangle (regardless of inside/outside).
 
     Parameters
     ----------
-    p_start, p_end : np.ndarray (3,)
-    mesh           : trimesh.Trimesh
-    n_samples      : int — number of intermediate check points
-    clearance      : float — required clearance (mm)
+    pts      : (N, 3)
+    mesh     : trimesh.Trimesh
+    clearance: float — mm
+
+    Returns
+    -------
+    too_close : (N,) bool array
     """
+    pts = np.atleast_2d(pts).astype(float)
     try:
         from trimesh import proximity
-    except ImportError:
-        return True   # can't check — assume clear
-
-    # Sample along the segment
-    ts   = np.linspace(0.0, 1.0, n_samples)
-    pts  = np.outer(1.0 - ts, p_start) + np.outer(ts, p_end)
-
-    _, dists, _ = proximity.closest_point(mesh, pts)
-    return float(dists.min()) >= clearance
-
-
-def point_clears_mesh(pt, mesh, clearance=CLEARANCE_MM):
-    """Return True if pt is at least clearance mm from the model surface."""
-    try:
-        from trimesh import proximity
-        _, dists, _ = proximity.closest_point(mesh, pt.reshape(1, 3))
-        return float(dists[0]) >= clearance
+        _, dists, _ = proximity.closest_point(mesh, pts)
+        return dists < clearance
     except Exception:
-        return True
+        return np.zeros(len(pts), dtype=bool)
+
+
+# ─── Point safety (combined) ──────────────────────────────────────────────────
+
+def point_is_safe(pt: np.ndarray, mesh, clearance: float = CLEARANCE_MM) -> bool:
+    """
+    Return True if pt is:
+      (a) NOT inside the mesh, AND
+      (b) at least `clearance` mm from any surface.
+
+    This is the single gate that every candidate node must pass.
+    """
+    p = pt.reshape(1, 3)
+    if point_is_inside(pt, mesh):
+        return False
+    near = points_near_surface(p, mesh, clearance)
+    return not bool(near[0])
+
+
+# ─── Segment safety ───────────────────────────────────────────────────────────
+
+def segment_is_safe(p_start: np.ndarray, p_end: np.ndarray,
+                    mesh, clearance: float = CLEARANCE_MM,
+                    n_samples: int = N_SEG_SAMPLES) -> bool:
+    """
+    Return True if the straight line p_start → p_end is entirely safe
+    (no sampled point is inside the mesh or closer than clearance to surface).
+
+    Parameters
+    ----------
+    p_start, p_end : (3,) arrays
+    mesh           : trimesh.Trimesh
+    clearance      : float — mm
+    n_samples      : int — number of intermediate check points
+    """
+    ts   = np.linspace(0.05, 0.95, n_samples)
+    pts  = np.outer(1.0 - ts, p_start) + np.outer(ts, p_end)  # (N, 3)
+
+    # Inside check
+    inside = points_inside_mesh(pts, mesh)
+    if inside.any():
+        return False
+
+    # Proximity check
+    near = points_near_surface(pts, mesh, clearance)
+    if near.any():
+        return False
+
+    return True
+
+
+# ─── Segment-segment minimum distance ────────────────────────────────────────
+
+def seg_seg_min_dist(p1: np.ndarray, p2: np.ndarray,
+                     p3: np.ndarray, p4: np.ndarray) -> float:
+    """
+    Minimum distance between two finite line segments p1-p2 and p3-p4.
+    Used to detect branch-branch collisions.
+    """
+    d1  = p2 - p1
+    d2  = p4 - p3
+    r   = p1 - p3
+    a   = np.dot(d1, d1)
+    e   = np.dot(d2, d2)
+    f   = np.dot(d2, r)
+
+    if a < 1e-10 and e < 1e-10:
+        return float(np.linalg.norm(r))
+
+    if a < 1e-10:
+        s = 0.0
+        t = np.clip(f / e, 0.0, 1.0)
+    else:
+        c = np.dot(d1, r)
+        if e < 1e-10:
+            t = 0.0
+            s = np.clip(-c / a, 0.0, 1.0)
+        else:
+            b    = np.dot(d1, d2)
+            denom = a * e - b * b
+            s    = np.clip((b * f - c * e) / denom, 0.0, 1.0) if denom > 1e-10 else 0.0
+            t    = (b * s + f) / e
+            if t < 0.0:
+                t = 0.0
+                s = np.clip(-c / a, 0.0, 1.0)
+            elif t > 1.0:
+                t = 1.0
+                s = np.clip((b - c) / a, 0.0, 1.0)
+
+    closest1 = p1 + s * d1
+    closest2 = p3 + t * d2
+    return float(np.linalg.norm(closest1 - closest2))

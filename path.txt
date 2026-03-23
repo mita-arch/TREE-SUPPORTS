@@ -1,21 +1,23 @@
 "C:\\Users\\hp\\Downloads\\Main\\Week 1\\Models\\T-shape.stl"
 "C:\\Users\\hp\\Downloads\\Main\\Week 1\\Models\\L shape.stl"
 
-python main.py "C:\Users\hp\Downloads\Main\Week 1\Models\T-shape.stl" `
-  --sample_spacing 1 `
-  --grid_resolution 6 `
-  --max_diameter 2.5 `
-  --n_topologies 2 `
-  --n_particles 20 `
-  --n_iterations 100
+python main.py "C:\\Users\\hp\\Downloads\\Main\\Week 1\\Models\\L shape.stl" `
+  --sample_spacing  2.0  `
+  --grid_resolution 5.0  `
+  --clearance       1.5  `
+  --tip_diameter    1  `
+  --max_diameter    2.5  `
+  --merge_depth     0.7  `
+  --merge_levels    4    `
+  --n_topologies    2
 
   python main.py "C:\\Users\\hp\\Downloads\\Main\\Week 1\\Models\\L shape.stl" `
-  --sample_spacing  2     `
-  --grid_resolution 7     `
-  --clearance       1   `
-  --tip_diameter    1   `
-  --max_diameter    3   `
-  --n_topologies    2     `
+  --sample_spacing  0.5     `
+  --grid_resolution 4     `
+  --clearance       1.5   `
+  --tip_diameter    0.75   `
+  --max_diameter    2.5   `
+  --n_topologies    3     `
   --n_particles 20        `
   --n_iterations 100           
 
@@ -25,6 +27,6 @@ python main.py "C:\Users\hp\Downloads\Main\Week 1\Models\T-shape.stl" `
   --clearance       1   `
   --tip_diameter    1   `
   --max_diameter    3   `
-  --n_topologies    2     `
+  --n_topologies   4      `
   --n_particles 20        `
   --n_iterations 100           
